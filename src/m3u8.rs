@@ -188,18 +188,3 @@ fn extract_attr<'a>(line: &'a str, key: &str) -> Option<&'a str> {
         .find(|part| part.trim_start().starts_with(key))
         .and_then(|part| part.split('=').nth(1))
 }
-
-pub async fn get_ts_segments(playlist_url: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let text = reqwest::get(playlist_url).await?.text().await?;
-    let base_url = playlist_url.rsplitn(2, '/').collect::<Vec<_>>()[1];
-
-    let mut segments = Vec::new();
-
-    for line in text.lines() {
-        if !line.starts_with("#") && line.ends_with(".ts") {
-            segments.push(format!("{}/{}", base_url, line));
-        }
-    }
-
-    Ok(segments)
-}
