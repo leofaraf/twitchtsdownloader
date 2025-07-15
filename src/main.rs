@@ -1,24 +1,27 @@
-use std::path::PathBuf;
-
 use clap::Parser;
 
 mod m3u8;
 mod ts;
 
 pub type HandleResult<T> = Result<T, Box<dyn std::error::Error>>;
-
-/// Clippy utility that accepts quality, VOD ID, and output folder
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
-struct Args {
-    /// VOD ID
-    vod: i64,
+pub struct Args {
+    /// Twitch VOD ID (e.g. 877379571)
+    #[arg(short, long)]
+    pub vod: i64,
 
-    /// Quality level (e.g., 1080p, 720p)
-    quality: String,
+    /// Desired quality level (e.g. 720p, 480p)
+    #[arg(short, long)]
+    pub quality: String,
 
-    /// Output folder path
-    output_folder: String,
+    /// Output folder for .ts files
+    #[arg(short, long)]
+    pub output: String,
+
+    /// Number of concurrent downloads
+    #[arg(short, long, default_value_t = 20)]
+    pub concurrency: usize,
 }
 
 #[tokio::main]
@@ -27,7 +30,7 @@ async fn main() -> HandleResult<()> {
 
     println!("VOD ID: {}", args.vod);
     println!("Quality: {}", args.quality);
-    println!("Output folder: {:?}", args.output_folder);
+    println!("Output folder: {:?}", args.output);
 
     // Here you could perform further logic (e.g., create output folder, call a function, etc.)
     let playlists = m3u8::parse_m3u8_playlists(
@@ -43,8 +46,8 @@ async fn main() -> HandleResult<()> {
 
         ts::download_ts_with_buffered_lib(
             ts_segments,
-            &args.output_folder,
-            4
+            &args.output,
+            args.concurrency
         ).await?;
     } else {
         println!("No matching playlist found.");
