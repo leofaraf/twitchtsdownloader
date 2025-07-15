@@ -1,5 +1,7 @@
 use futures::{stream, StreamExt};
 use reqwest::Client;
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use tokio::{fs::File, io::{stdout, AsyncWriteExt}};
 use std::{path::{Path, PathBuf}, sync::{atomic::{AtomicUsize, Ordering}, Arc}};
 
@@ -21,7 +23,7 @@ pub async fn get_ts_segments(playlist_url: &str) -> HandleResult<Vec<String>> {
 }
 
 async fn download_with_retry(
-    client: Arc<Client>,
+    client: Arc<ClientWithMiddleware>,
     url: String,
     filename: String,
     progress: Arc<AtomicUsize>,
@@ -43,10 +45,15 @@ pub async fn download_ts_with_buffered_lib(
     output_dir: &str,
     max_concurrent: usize,
 ) -> HandleResult<()> {
-    let client = Arc::new(Client::new());
+    let retry_policy = ExponentialBackoff::builder().build_with_max_retries(5);
+    let client = ClientBuilder::new(reqwest::Client::new())
+        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+        .build();
+
+    let client = Arc::new(client);
     let total = urls.len();
     let progress = Arc::new(AtomicUsize::new(0));
-
+    
     let download_tasks = stream::iter(
         urls.into_iter().enumerate().map(|(i, url)| {
             let client = client.clone();
@@ -61,6 +68,7 @@ pub async fn download_ts_with_buffered_lib(
         })
     );
 
+    println!("Start downloading...");
     download_tasks
         .buffered(max_concurrent)
         .collect::<Vec<_>>()
