@@ -1,6 +1,7 @@
+use futures::{stream, StreamExt};
 use reqwest::Client;
-use tokio::{fs::File, io::AsyncWriteExt};
-use std::path::{Path, PathBuf};
+use tokio::{fs::File, io::{stdout, AsyncWriteExt}};
+use std::{path::{Path, PathBuf}, sync::{atomic::{AtomicUsize, Ordering}, Arc}};
 
 use crate::HandleResult;
 
@@ -19,19 +20,52 @@ pub async fn get_ts_segments(playlist_url: &str) -> HandleResult<Vec<String>> {
     Ok(segments)
 }
 
-pub async fn download_ts_fragment(
-    url: &str,
-    output_path: PathBuf,
+async fn download_with_retry(
+    client: Arc<Client>,
+    url: String,
+    filename: String,
+    progress: Arc<AtomicUsize>,
+    total: usize,
 ) -> HandleResult<()> {
     // Start downloading
-    let client = Client::new();
     let mut resp = client.get(url).send().await?.error_for_status()?;
 
-    let mut file = File::create(output_path.clone()).await?;
+    let mut file = File::create(&filename).await?;
     while let Some(chunk) = resp.chunk().await? {
         file.write_all(&chunk).await?;
     }
 
-    println!("✅ Downloaded to {:?}", output_path);
+    Ok(())
+}
+
+pub async fn download_ts_with_buffered_lib(
+    urls: Vec<String>,
+    output_dir: &str,
+    max_concurrent: usize,
+) -> HandleResult<()> {
+    let client = Arc::new(Client::new());
+    let total = urls.len();
+    let progress = Arc::new(AtomicUsize::new(0));
+
+    let download_tasks = stream::iter(
+        urls.into_iter().enumerate().map(|(i, url)| {
+            let client = client.clone();
+            let progress = progress.clone();
+            let filename = format!("{}/{}.ts", output_dir, i);
+
+            async move {
+                // let done = progress.fetch_add(1, Ordering::SeqCst) + 1;
+                // print!("Progress: {}/{}", done, total);
+                download_with_retry(client, url, filename, progress, total).await
+            }
+        })
+    );
+
+    download_tasks
+        .buffered(max_concurrent)
+        .collect::<Vec<_>>()
+        .await;
+
+    println!("\n✅ Done downloading all fragments.");
     Ok(())
 }

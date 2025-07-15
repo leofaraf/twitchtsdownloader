@@ -18,7 +18,7 @@ struct Args {
     quality: String,
 
     /// Output folder path
-    output_folder: PathBuf,
+    output_folder: String,
 }
 
 #[tokio::main]
@@ -40,22 +40,12 @@ async fn main() -> HandleResult<()> {
 
         // Here you could add code to download the playlist or perform other actions
         let ts_segments = ts::get_ts_segments(&playlist.url).await?;
-        println!("Found TS segments: {:#?}", ts_segments[0]);
 
-        for (i, url) in ts_segments.iter().enumerate() {
-            // Parse the segment id from the URL (e.g., "0.ts" from ".../chunked/0.ts")
-            let segment_url = url;
-            let segment_id = segment_url
-                .split('/')
-                .last()
-                .unwrap_or("segment.ts");
-
-            print!("\rProgress: {}/{}", i, ts_segments.len());
-            ts::download_ts_fragment(
-                segment_url,
-                args.output_folder.join(segment_id)
-            ).await?;
-        }
+        ts::download_ts_with_buffered_lib(
+            ts_segments,
+            &args.output_folder,
+            4
+        ).await?;
     } else {
         println!("No matching playlist found.");
         println!("Available playlists: {:#?}", playlists);
