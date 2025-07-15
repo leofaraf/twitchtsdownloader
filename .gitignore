@@ -1,1 +1,5 @@
 /target
+**/*.ts
+*.m3u8
+*.js
+node_modules/
