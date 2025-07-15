@@ -6,6 +6,13 @@ use urlencoding;
 
 const CLIENT_ID: &str = "kimne78kx3ncx6brgo4mv6wki5h1ko";
 
+#[derive(Debug, Clone)]
+pub struct M3U8Playlist {
+    pub quality: String,
+    pub resolution: Option<String>,
+    pub url: String,
+}
+
 #[derive(Deserialize, Debug)]
 pub struct AccessToken {
     pub value: String,
@@ -105,7 +112,7 @@ pub async fn get_access_token(id: &str, is_vod: bool) -> Result<AccessToken, Box
     }
 }
 
-pub async fn fetch_m3u8_playlist(vod: i64) -> HandleResult<String> {
+pub async fn fetch_m3u8_playlists(vod: i64) -> HandleResult<String> {
     let token = get_access_token(&vod.to_string(), true)
         .await
         .expect("Failed to fetch access token");
@@ -124,4 +131,75 @@ pub async fn fetch_m3u8_playlist(vod: i64) -> HandleResult<String> {
         .await?;
 
     Ok(playlist_text)
+}
+
+use std::collections::HashMap;
+
+pub fn parse_m3u8_playlists(raw: &str) -> Vec<M3U8Playlist> {
+    let mut result = Vec::new();
+    let mut media_name_map = HashMap::new();
+    let lines: Vec<&str> = raw.lines().collect();
+
+    // First pass: build VIDEO group ID → quality name map from #EXT-X-MEDIA lines
+    for line in &lines {
+        if line.starts_with("#EXT-X-MEDIA") && line.contains("TYPE=VIDEO") {
+            if let (Some(group_id), Some(name)) = (
+                extract_attr(line, "GROUP-ID"),
+                extract_attr(line, "NAME"),
+            ) {
+                media_name_map.insert(group_id.trim_matches('"'), name.trim_matches('"'));
+            }
+        }
+    }
+
+    // Second pass: match #EXT-X-STREAM-INF with next URL and resolve name from VIDEO attr
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].starts_with("#EXT-X-STREAM-INF") {
+            let resolution = extract_attr(lines[i], "RESOLUTION").map(|r| r.to_string());
+
+            let video_id = extract_attr(lines[i], "VIDEO")
+                .unwrap_or("")
+                .trim_matches('"');
+
+            let quality = media_name_map
+                .get(video_id)
+                .unwrap_or(&"unknown")
+                .to_string();
+
+            if i + 1 < lines.len() {
+                let url = lines[i + 1].to_string();
+                result.push(M3U8Playlist {
+                    quality,
+                    resolution,
+                    url,
+                });
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+
+    result
+}
+
+fn extract_attr<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.split(',')
+        .find(|part| part.trim_start().starts_with(key))
+        .and_then(|part| part.split('=').nth(1))
+}
+
+pub async fn get_ts_segments(playlist_url: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let text = reqwest::get(playlist_url).await?.text().await?;
+    let base_url = playlist_url.rsplitn(2, '/').collect::<Vec<_>>()[1];
+
+    let mut segments = Vec::new();
+
+    for line in text.lines() {
+        if !line.starts_with("#") && line.ends_with(".ts") {
+            segments.push(format!("{}/{}", base_url, line));
+        }
+    }
+
+    Ok(segments)
 }

@@ -28,10 +28,21 @@ async fn main() -> HandleResult<()> {
     println!("Output folder: {:?}", args.output_folder);
 
     // Here you could perform further logic (e.g., create output folder, call a function, etc.)
-    let token = m3u8::get_access_token(&args.vod.to_string(), true).await.unwrap();
-    println!("Fetched access token: {:?}", token);
+    let playlists = m3u8::parse_m3u8_playlists(
+        &m3u8::fetch_m3u8_playlists(args.vod).await?
+    );
+    println!("Parsed M3U8 playlists: {}", playlists.len());
 
-    let playlist = m3u8::fetch_m3u8_playlist(args.vod).await?;
+    if let Some(playlist) = playlists.iter().find(|p| p.quality == args.quality) {
+        println!("Found matching playlist: {:#?}", playlist);
+
+        // Here you could add code to download the playlist or perform other actions
+        let ts_segments = m3u8::get_ts_segments(&playlist.url).await?;
+        println!("Found TS segments: {:#?}", ts_segments[0]);
+    } else {
+        println!("No matching playlist found.");
+        println!("Available playlists: {:#?}", playlists);
+    }
 
     Ok(())
 }
